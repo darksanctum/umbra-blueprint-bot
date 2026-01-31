@@ -1,20 +1,18 @@
 const http = require('http');
 const https = require('https');
 
-// ============ CONFIGURACIÃ“N (usa variables de entorno en producciÃ³n) ============
-const PORT = process.env.PORT || 3847;
+// ============ CONFIGURACIÃ“N ============
+const PORT = process.env.PORT || 10000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'umbra_verify_2026';
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN; // REQUERIDO en producciÃ³n
-const INSTAGRAM_USER_ID = process.env.INSTAGRAM_USER_ID; // REQUERIDO en producciÃ³n
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; // Page Token (no User Token)
+const INSTAGRAM_USER_ID = process.env.INSTAGRAM_USER_ID;
 const KEYWORD = process.env.KEYWORD || 'blueprint';
 
-// Validar configuraciÃ³n crÃ­tica
-if (!ACCESS_TOKEN || !INSTAGRAM_USER_ID) {
-  console.error('âŒ ERROR: Faltan variables de entorno requeridas:');
-  console.error('   - ACCESS_TOKEN: Token de Instagram/Meta API');
-  console.error('   - INSTAGRAM_USER_ID: ID de usuario de Instagram');
-  console.error('');
-  console.error('ConfigÃºralas en tu plataforma de hosting (Railway, Render, etc.)');
+// Validar configuraciÃ³n
+if (!PAGE_ACCESS_TOKEN || !INSTAGRAM_USER_ID) {
+  console.error('âŒ ERROR: Faltan variables de entorno:');
+  console.error('   - PAGE_ACCESS_TOKEN');
+  console.error('   - INSTAGRAM_USER_ID');
   process.exit(1);
 }
 
@@ -50,7 +48,6 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end(challenge);
     } else {
-      console.log('âŒ VerificaciÃ³n fallida');
       res.writeHead(403);
       res.end('Forbidden');
     }
@@ -62,13 +59,13 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
-      console.log('ðŸ“¥ Evento recibido');
+      console.log('ðŸ“¥ Evento recibido:', body.substring(0, 500));
       
       try {
         const data = JSON.parse(body);
         processInstagramEvent(data);
       } catch (e) {
-        console.error('âŒ Error parsing JSON:', e.message);
+        console.error('âŒ Error parsing:', e.message);
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -80,11 +77,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-      status: 'ok', 
-      service: 'Umbra Blueprint Bot',
-      timestamp: new Date().toISOString() 
-    }));
+    res.end(JSON.stringify({ status: 'ok', service: 'Umbra Blueprint Bot' }));
     return;
   }
 
@@ -103,37 +96,37 @@ function processInstagramEvent(data) {
         if (change.field === 'comments' && change.value) {
           const comment = change.value;
           const text = (comment.text || '').toLowerCase();
+          const senderId = comment.from?.id;
           
-          console.log(`ðŸ’¬ Comentario detectado con keyword check`);
+          console.log(`ðŸ’¬ Comentario: "${comment.text}" de ID: ${senderId}`);
           
-          if (text.includes(KEYWORD)) {
-            console.log('ðŸŽ¯ Keyword detectada! Enviando DM...');
-            sendDM(comment.from?.id);
+          if (text.includes(KEYWORD) && senderId) {
+            console.log('ðŸŽ¯ Keyword detectada! Enviando DM a:', senderId);
+            sendInstagramDM(senderId);
           }
         }
       }
     }
 
-    // Story replies / DMs
+    // Story replies / DMs (messaging)
     if (entry.messaging) {
       for (const msg of entry.messaging) {
         const text = (msg.message?.text || '').toLowerCase();
         const senderId = msg.sender?.id;
-        const isStoryReply = msg.message?.reply_to?.story;
 
-        console.log(`ðŸ“© ${isStoryReply ? 'Story reply' : 'DM'} recibido`);
+        console.log(`ðŸ“© Mensaje recibido de ${senderId}: "${msg.message?.text}"`);
 
-        if (text.includes(KEYWORD)) {
+        if (text.includes(KEYWORD) && senderId) {
           console.log('ðŸŽ¯ Keyword detectada! Enviando DM...');
-          sendDM(senderId);
+          sendInstagramDM(senderId);
         }
       }
     }
   }
 }
 
-// ============ ENVIAR DM ============
-function sendDM(recipientId) {
+// ============ ENVIAR DM VIA INSTAGRAM API ============
+function sendInstagramDM(recipientId) {
   if (!recipientId) {
     console.error('âŒ No recipient ID');
     return;
@@ -147,7 +140,7 @@ function sendDM(recipientId) {
   const options = {
     hostname: 'graph.facebook.com',
     port: 443,
-    path: `/v18.0/${INSTAGRAM_USER_ID}/messages?access_token=${ACCESS_TOKEN}`,
+    path: `/v18.0/${INSTAGRAM_USER_ID}/messages?access_token=${PAGE_ACCESS_TOKEN}`,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -155,22 +148,22 @@ function sendDM(recipientId) {
     }
   };
 
+  console.log('ðŸ“¤ Enviando a:', options.path.split('?')[0]);
+
   const req = https.request(options, (res) => {
     let data = '';
     res.on('data', chunk => { data += chunk; });
     res.on('end', () => {
+      console.log(`ðŸ“¨ Respuesta API (${res.statusCode}):`, data.substring(0, 200));
       if (res.statusCode === 200) {
-        console.log(`âœ… DM enviado exitosamente`);
+        console.log('âœ… DM enviado exitosamente');
       } else {
-        console.error(`âŒ Error enviando DM (${res.statusCode})`);
+        console.error('âŒ Error en respuesta:', data);
       }
     });
   });
 
-  req.on('error', (e) => {
-    console.error('âŒ Error de red:', e.message);
-  });
-
+  req.on('error', (e) => console.error('âŒ Error de red:', e.message));
   req.write(messageBody);
   req.end();
 }
@@ -178,12 +171,11 @@ function sendDM(recipientId) {
 // ============ INICIAR ============
 server.listen(PORT, '0.0.0.0', () => {
   console.log('');
-  console.log('ðŸš€ ================================');
-  console.log('   UMBRA BLUEPRINT BOT');
-  console.log('================================');
-  console.log(`   Puerto: ${PORT}`);
-  console.log(`   Keyword: "${KEYWORD}"`);
-  console.log('   Tokens: âœ“ Configurados');
-  console.log('================================');
+  console.log('ðŸš€ UMBRA BLUEPRINT BOT');
+  console.log('========================');
+  console.log(`Puerto: ${PORT}`);
+  console.log(`Keyword: "${KEYWORD}"`);
+  console.log(`IG User ID: ${INSTAGRAM_USER_ID}`);
+  console.log('========================');
   console.log('');
 });
