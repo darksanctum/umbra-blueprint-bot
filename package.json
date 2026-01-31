@@ -1,0 +1,12 @@
+{
+  "name": "umbra-blueprint-bot",
+  "version": "1.0.0",
+  "description": "Instagram Blueprint DM Bot para Umbra Training",
+  "main": "blueprint_bot.js",
+  "scripts": {
+    "start": "node blueprint_bot.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
